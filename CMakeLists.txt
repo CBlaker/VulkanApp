@@ -12,7 +12,6 @@ include_directories(${GLFW_INCLUDE_DIRS})
 find_package(glm REQUIRED)
 include_directories(${GLM_INCLUDE_DIRS})
 
-
 add_executable(vkApp src/main.cpp)
 
 target_link_libraries(vkApp ${Vulkan_LIBRARIES} glfw)
