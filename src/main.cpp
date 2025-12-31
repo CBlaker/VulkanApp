@@ -3,9 +3,12 @@
 
 #include <iostream>
 #include <stdexcept>
+
 #include <cstdlib>
 #include <cstring>
 #include <format>
+
+#include <optional>
 #include <vector>
 
 const uint32_t WINWIDTH = 800;
@@ -21,7 +24,7 @@ const std::vector<const char*> validationLayers = {
     const bool enableValidationLayers = true;
 #endif
 
-
+//Creates Debug Messenger Instance at runtime
 VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, 
                                 const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, 
                                 const VkAllocationCallbacks* pAllocator, 
@@ -35,6 +38,7 @@ VkResult CreateDebugUtilsMessengerEXT(VkInstance instance,
     }
 }
 
+//Destroys Debug Messenger Instance at runtime
 void DestroyDebugUtilsMessengerEXT(VkInstance instance, 
                                   VkDebugUtilsMessengerEXT debugMessenger, 
                             const VkAllocationCallbacks* pAllocator) {
@@ -56,6 +60,11 @@ public:
 private:
     GLFWwindow* window;
     VkInstance instance;
+
+    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+    VkDevice device;
+    VkQueue graphicsQueue;
+
     VkDebugUtilsMessengerEXT debugMessenger;
 
     //Gets Required Extensions for GLFW and Validation Layer Debugging
@@ -124,6 +133,7 @@ private:
         createInfo.pUserData = nullptr;
     }
 
+    //Creates Vulkan Instance
     void createInstance() {
         std::cout << "Validation Layers: " << std::format("{}", enableValidationLayers) << std::endl;
         
@@ -175,18 +185,124 @@ private:
         }
     }
 
+    struct QueueFamilyIndicies {
+        std::optional<uint32_t> graphicsFamily;
+
+        bool isComplete() {
+            return graphicsFamily.has_value();
+        }
+    };
+
+    //Find Graphics Queue Family
+    QueueFamilyIndicies findQueueFamilies(VkPhysicalDevice device) {
+        QueueFamilyIndicies indices;
+        uint32_t queueFamilyCount = 0;
+
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+        int i = 0;
+        for (const auto& queueFamily : queueFamilies) {
+            if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+                indices.graphicsFamily = i;
+            }
+
+            if (indices.isComplete()) {
+                break;
+            }
+
+            i++;
+        }
+        return indices;
+    }
+
+
+
+    //Check if Physical Device is Suitable for Vulkan
+    bool isDeviceSuitable(VkPhysicalDevice device) {
+        QueueFamilyIndicies indices = findQueueFamilies(device);
+
+        return indices.isComplete();
+    }
+
+    //Picks Physical Device for Vulkan
+    void pickPhysicalDevice() {
+        VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+        uint32_t deviceCount = 0;
+        vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+        
+        if (deviceCount = 0) {
+            throw std::runtime_error("Failed to find Vulkan Supported GPU");
+        }
+
+        std::vector<VkPhysicalDevice> devices(deviceCount);
+        vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+
+        for (const auto& device : devices) {
+            if (isDeviceSuitable(device)) {
+                physicalDevice = device;
+                break;
+            }
+        }
+        if (physicalDevice == VK_NULL_HANDLE) {
+            throw std::runtime_error("Failed to find Suitable GPU");
+        }
+        
+    }
+
+    //Creates the Logical Device that interfaces with the GPU
+    void createLogicalDevice() {
+        QueueFamilyIndicies indices = findQueueFamilies(physicalDevice);
+        float queuePriority = 1.0f;
+
+        //Filling out all the settings
+        //Settings for the Device Command Queue
+        VkDeviceQueueCreateInfo queueCreateInfo{};
+        queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
+        queueCreateInfo.queueCount = 1;
+        queueCreateInfo.pQueuePriorities = &queuePriority;
+
+        //Settings for the Device Features
+        VkPhysicalDeviceFeatures deviceFeatures{};
+
+        //Settings for the Device itself
+        VkDeviceCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        createInfo.pQueueCreateInfos = &queueCreateInfo;
+        createInfo.queueCreateInfoCount = 1;
+        createInfo.pEnabledFeatures = &deviceFeatures;
+        createInfo.enabledExtensionCount = 0;
+
+        if (enableValidationLayers) {
+            createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+            createInfo.ppEnabledLayerNames = validationLayers.data();
+        } else {
+            createInfo.enabledLayerCount = 0;
+        }
+
+        if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to Create Logical Device");
+        }
+
+        vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
+
+    }
+
     void initWindow() {
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
         window = glfwCreateWindow(WINWIDTH, WINHEIGHT, "Triangle Rasterizer", nullptr, nullptr);
-
     }
 
     void initVulkan() {
         createInstance();
         setupDebugMessenger();
+        pickPhysicalDevice();
+        createLogicalDevice();
     }
 
     void setupDebugMessenger() {
@@ -208,6 +324,8 @@ private:
     }
 
     void cleanup() {
+        vkDestroyDevice(device, nullptr);
+
         if (enableValidationLayers) {
             DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
         }
